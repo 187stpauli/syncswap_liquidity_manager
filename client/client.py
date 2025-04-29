@@ -229,39 +229,46 @@ class Client:
 
     # Approve
     async def approve_lp_token(self, lp_token_contract, spender, amount):
-        owner = self.address
-        nonce = await self.w3.eth.get_transaction_count(owner)
-        chain_id = await self.w3.eth.chain_id
+        try:
+            owner = self.address
+            nonce = await self.w3.eth.get_transaction_count(owner)
+            chain_id = await self.w3.eth.chain_id
 
-        tx_params = {
-            'from': owner,
-            'nonce': nonce,
-            'gas': 300_000,
-            'chainId': chain_id
-        }
+            tx_params = {
+                'from': owner,
+                'nonce': nonce,
+                'gas': 300_000,
+                'chainId': chain_id
+            }
 
-        if self.eip_1559:
-            base_fee = await self.w3.eth.gas_price
-            max_priority_fee = int(base_fee * 0.1) or 1_000_000  # Минимальная чаевая
-            max_fee = int(base_fee * 1.5 + max_priority_fee)
+            if self.eip_1559:
+                base_fee = await self.w3.eth.gas_price
+                max_priority_fee = int(base_fee * 0.1) or 1_000_000  # Минимальная чаевая
+                max_fee = int(base_fee * 1.5 + max_priority_fee)
 
-            tx_params.update({
-                'maxPriorityFeePerGas': max_priority_fee,
-                'maxFeePerGas': max_fee,
-                'type': '0x2'
-            })
-        else:
-            tx_params['gasPrice'] = int(await self.w3.eth.gas_price * 1.25)
+                tx_params.update({
+                    'maxPriorityFeePerGas': max_priority_fee,
+                    'maxFeePerGas': max_fee,
+                })
+            else:
+                gas_price = await self.w3.eth.gas_price
+                tx_params['gasPrice'] = int(gas_price * 1.1)
 
-        # Формирование транзакции approve
-        tx = await lp_token_contract.functions.approve(spender, amount).build_transaction(tx_params)
+            approve_tx = await lp_token_contract.functions.approve(
+                spender, amount
+            ).build_transaction(tx_params)
 
-        # Подпись и отправка
-        signed_tx = self.w3.eth.account.sign_transaction(tx, self.private_key)
-        tx_hash = await self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = await self.w3.eth.wait_for_transaction_receipt(tx_hash)
-
-        return receipt
+            signed_tx = self.w3.eth.account.sign_transaction(approve_tx, self.private_key)
+            tx_hash = await self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            logger.info(f"Отправлена транзакция approve: {tx_hash.hex()}")
+            
+            # Ждем подтверждения транзакции approve
+            receipt = await self.wait_tx(tx_hash, self.explorer_url)
+            return receipt is True
+            
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении approve: {e}")
+            return False
 
     # Подготовка транзакции
     async def prepare_tx(self, value: Union[int, float] = 0) -> TxParams:
